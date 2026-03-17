@@ -1,0 +1,244 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-11-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(tidyverse)
+library(here)
+
+```
+
+```{r} 
+
+
+ew <- read_csv(here("data", "ew_data_4.csv"))
+
+ew_filtered <- ew %>%
+  rename(
+    ethnic_group    = `Ethnic group (6 categories) Code`,
+    degree          = `Highest level of qualification (7 categories) Code`,
+    age             = `Age (12 categories) Code`,
+    sex             = `Sex (2 categories) Code`,
+    regions         = Regions, 
+    dependent_child = `Dependent children in household and their age (6 categories) Code`,
+    count           = Observation
+  ) %>%
+  filter(
+    !age %in% c(1, 2, 9, 10, 11,12),              
+    dependent_child %in% c(1,2),
+    sex == 1  
+  ) %>%
+  mutate(
+    ethnicity = case_when(
+      ethnic_group == 1 ~ "Asian",
+      ethnic_group == 2 ~ "Black",
+      ethnic_group == 3 ~ "Mixed",  
+      ethnic_group == 4 ~ "White", 
+      ethnic_group == 5 ~ "Other",  
+      TRUE ~ "Unknown"
+    ),
+    age_group = case_when(
+      age %in% c(3, 4) ~ "19-29",
+      age %in% c(5, 6) ~ "30-39",
+      age %in% c(7, 8) ~ "40+",
+      TRUE ~ "Unknown"
+    ),
+    degree_category = case_when(
+      degree %in% c(-8, 0, 1, 2, 3, 5) ~ "No degree",
+      degree == 4 ~ "Degree",
+      TRUE ~ "Unknown"
+    )
+  )
+
+
+
+ew_eth_deg_counts <- ew_filtered %>%
+  group_by(ethnicity, degree_category) %>%
+  summarise(total_count = sum(count, na.rm = TRUE)) %>%
+  ungroup()
+
+
+ew_age_counts <- ew_filtered %>%
+  group_by(age_group) %>%
+  summarise(total_count = sum(count, na.rm = TRUE)) %>%
+  ungroup()
+
+
+region_counts <- ew_filtered %>%
+  group_by(regions) %>%
+  summarise(total_count = sum(count, na.rm = TRUE)) %>%
+  ungroup()
+
+```
+
+```{r}
+
+scotland <- read_csv(here("data", "scot_sex_age_eth_ed_depend.csv"))
+
+scotland_filter <- scotland  %>% 
+  fill(sex, age_group, ethnicity,degree, .direction="down") %>% 
+  filter(sex == "Female") %>% 
+  filter(grepl("With dependent", household)) %>% 
+  filter(age_group %in% c("Aged 18 to 19", "Aged 20 to 24", "Aged 25 to 29", "Aged 30 to 34", "Aged 35 to 39", "Aged 40 to 44")) %>% 
+  mutate(degree = case_when(
+    grepl("^Degree", degree) ~ "Has Degree", 
+    grepl("Not applicable", degree) ~ NA_character_, 
+    TRUE ~ "No Degree"
+  ), 
+  ethnicity = case_when(
+    grepl("African|Caribbean", ethnicity) ~ "Black", 
+    grepl("Asian", ethnicity) ~ "Asian", 
+    grepl("White", ethnicity) ~ "White", 
+    grepl("Mixed", ethnicity) ~ "Mixed", 
+    grepl("Other", ethnicity) ~ "Other", 
+    TRUE ~ NA_character_
+  )) %>% 
+  group_by(ethnicity, degree) %>% 
+  summarise(count = sum(count)) %>% 
+  ungroup() %>% 
+  mutate(pct = count/sum(count))
+
+```
+
+```{r}
+
+library(tidyverse)
+library(here)
+
+
+
+# First, fill down the NA values (sparse format issue)
+scotland <- scotland %>%
+  fill(sex, age_group, ethnicity, degree, .direction = "down")
+
+# Clean and recode Scotland data to match England format
+scotland_filtered <- scotland %>%
+  filter(
+    sex == "Female",
+    grepl("With dependent", household),
+    age_group %in% c("Aged 18 to 19", "Aged 20 to 24", "Aged 25 to 29", 
+                     "Aged 30 to 34", "Aged 35 to 39", "Aged 40 to 44")
+  ) %>%
+  # Recode degree
+  mutate(
+    degree_category = case_when(
+      grepl("^Degree", degree) ~ "Degree",
+      grepl("Not applicable", degree) ~ NA_character_,
+      TRUE ~ "No degree"
+    )
+  ) %>%
+  # Remove rows with NA degree
+  filter(!is.na(degree_category)) %>%
+  # Recode ethnicity
+  mutate(
+    ethnicity = case_when(
+      grepl("African|Caribbean", ethnicity) ~ "Black",
+      grepl("Asian", ethnicity) ~ "Asian",
+      grepl("White", ethnicity) ~ "White",
+      grepl("Mixed", ethnicity) ~ "Mixed",
+      grepl("Other", ethnicity) ~ "Other",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  # Remove rows with NA ethnicity
+  filter(!is.na(ethnicity)) %>%
+  # Recode age groups to match England (19-29, 30-39, 40+)
+  mutate(
+    age_group = case_when(
+      age_group %in% c("Aged 18 to 19", "Aged 20 to 24", "Aged 25 to 29") ~ "19-29",
+      age_group %in% c("Aged 30 to 34", "Aged 35 to 39") ~ "30-39",
+      age_group %in% c("Aged 40 to 44") ~ "40+",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(age_group)) %>%
+  # Add region
+  mutate(regions = "Scotland")
+
+# Create summary tables
+scotland_eth_deg_counts <- scotland_filtered %>%
+  group_by(ethnicity, degree_category) %>%
+  summarise(total_count = sum(count, na.rm = TRUE), .groups = "drop")
+
+scotland_age_counts <- scotland_filtered %>%
+  group_by(age_group) %>%
+  summarise(total_count = sum(count, na.rm = TRUE), .groups = "drop")
+
+scotland_region_counts <- scotland_filtered %>%
+  group_by(regions) %>%
+  summarise(total_count = sum(count, na.rm = TRUE), .groups = "drop")
+
+
+
+
+combined_data <- bind_rows(
+  ew_filtered %>% 
+    select(ethnicity, degree_category, age_group, regions, count) %>%
+    mutate(country = "England & Wales"),
+  scotland_filtered %>% 
+    select(ethnicity, degree_category, age_group, regions, count) %>%
+    mutate(country = "Scotland")
+)
+
+
+
+# Combined summary tables
+combined_eth_deg_counts <- combined_data %>%
+  group_by(ethnicity, degree_category) %>%
+  summarise(total_count = sum(count, na.rm = TRUE), .groups = "drop")
+
+combined_age_counts <- combined_data %>%
+  group_by(age_group) %>%
+  summarise(total_count = sum(count, na.rm = TRUE), .groups = "drop")
+
+combined_region_counts <- combined_data %>%
+  group_by(regions) %>%
+  summarise(total_count = sum(count, na.rm = TRUE), .groups = "drop")
+
+
+
+
+# Table 1: Overall ethnicity x degree counts and percentages
+combined_eth_deg_counts <- combined_data %>%
+  group_by(ethnicity, degree_category) %>%
+  summarise(total_count = sum(count, na.rm = TRUE), .groups = "drop") %>%
+  mutate(pct = round(total_count / sum(total_count) * 100, 2))
+
+# Table 2: Within-ethnicity degree attainment rates
+combined_eth_deg_within <- combined_data %>%
+  group_by(ethnicity, degree_category) %>%
+  summarise(total_count = sum(count, na.rm = TRUE), .groups = "drop") %>%
+  group_by(ethnicity) %>%
+  mutate(pct_within_ethnicity = round(total_count / sum(total_count) * 100, 2)) %>%
+  ungroup()
+
+combined_age_counts <- combined_data %>%
+  group_by(age_group) %>%
+  summarise(total_count = sum(count, na.rm = TRUE), .groups = "drop") %>%
+  mutate(pct = round(total_count / sum(total_count) * 100, 2))
+
+combined_region_counts <- combined_data %>%
+  group_by(regions) %>%
+  summarise(total_count = sum(count, na.rm = TRUE), .groups = "drop") %>%
+  mutate(pct = round(total_count / sum(total_count) * 100, 2))
+
+
+
+
+# Save ouput 
+
+write_csv(combined_age_counts, here("output", "age.csv"))
+write_csv(combined_eth_deg_counts, here("output", "eth_deg_counts.csv"))
+write.csv(combined_eth_deg_within, here("output", "eth_deg_within.csv"))
+write_csv(combined_region_counts, here("output", "region_counts.csv"))
+
+
+
+
